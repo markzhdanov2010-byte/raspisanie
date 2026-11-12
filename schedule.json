@@ -2,7 +2,7 @@
  "group": "10 МА-13",
  "sheetUrl": "https://docs.google.com/spreadsheets/d/1Hdv6x7BuGDMtH3QJowMVQBIDpySs4z1RBcPq4xIRy54/edit?usp=sharing",
  "timezone": "Europe/Kyiv",
- "morningHour": 7,
+ "morningHour": 8,
  "eveningHour": 21,
  "wakeBeforeMin": 60,
  "wakeBeforeRemoteMin": 15,
