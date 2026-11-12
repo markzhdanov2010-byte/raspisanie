@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Расписание">
+<meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Расписание</title>
+<style>
+  :root { --bg:#0f1115; --card:#191c23; --line:#262a33; --text:#eef0f4; --mute:#8b92a1; --acc:#7c9cff; --ok:#5fd39a; --sleep:#c7a6ff; --warm:#ffc46b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+         padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 32px); max-width:560px; margin-inline:auto; }
+  h1 { font-size:30px; margin:4px 0 2px; letter-spacing:-.02em; }
+  .sub { color:var(--mute); margin:0 0 16px; }
+  .tabs { display:flex; gap:6px; margin-bottom:16px; }
+  .tabs button { flex:1; padding:9px 0; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--mute); font:600 14px inherit; font-family:inherit; }
+  .tabs button.on { background:var(--acc); border-color:var(--acc); color:#0b0d12; }
+  .tabs button.today:not(.on) { color:var(--text); border-color:var(--acc); }
+  .hero { background:linear-gradient(135deg,#232a44,#1a1d26); border:1px solid var(--line); border-radius:20px; padding:16px 18px; margin-bottom:14px; }
+  .hero .k { color:var(--mute); font-size:13px; text-transform:uppercase; letter-spacing:.06em; }
+  .hero .v { font-size:20px; font-weight:650; margin-top:4px; }
+  .list { display:flex; flex-direction:column; gap:8px; }
+  .item { display:flex; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:12px 14px; }
+  .item .t { width:50px; flex:none; font-variant-numeric:tabular-nums; }
+  .item .t b { display:block; font-size:16px; } .item .t span { color:var(--mute); font-size:13px; }
+  .item .s { font-weight:600; } .item .r { color:var(--mute); font-size:14px; }
+  .item.now { border-color:var(--ok); box-shadow:0 0 0 1px var(--ok) inset; }
+  .item.past { opacity:.45; }
+  .item.skip { border-style:dashed; }
+  .tag { display:inline-block; font-size:12px; padding:2px 8px; border-radius:99px; margin-top:4px; }
+  .tag.sleep { background:#2b2340; color:var(--sleep); } .tag.now { background:#183326; color:var(--ok); }
+  .gap { color:var(--warm); font-size:14px; padding:2px 14px; }
+  .empty { text-align:center; color:var(--mute); padding:40px 0; font-size:18px; }
+  section.box { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:16px; margin-top:22px; }
+  section.box h2 { font-size:17px; margin:0 0 8px; }
+  section.box p { color:var(--mute); margin:6px 0; font-size:15px; }
+  .btn { display:block; width:100%; padding:13px; border:0; border-radius:14px; background:var(--acc); color:#0b0d12; font:650 16px inherit; font-family:inherit; margin-top:10px; text-align:center; text-decoration:none; }
+  .btn.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+  textarea { width:100%; height:110px; margin-top:10px; background:#0b0d12; color:#9fb3ff; border:1px solid var(--line); border-radius:12px; padding:10px; font:12px ui-monospace, Menlo, monospace; }
+  ol { color:var(--mute); padding-left:20px; margin:8px 0; font-size:15px; } ol b { color:var(--text); }
+</style>
+</head>
+<body>
+  <h1 id="title">Расписание</h1>
+  <p class="sub" id="subtitle"></p>
+  <div class="tabs" id="tabs"></div>
+  <div class="hero" id="hero" hidden><div class="k" id="heroK"></div><div class="v" id="heroV"></div></div>
+  <div class="list" id="list"></div>
+
+  <section class="box" id="notif">
+    <h2>🔔 Уведомления</h2>
+    <div id="notifBody"></div>
+  </section>
+
+  <section class="box">
+    <h2>📄 Исходная таблица</h2>
+    <p>Ссылки на Zoom и Meet — в таблице группы.</p>
+    <a class="btn ghost" id="sheet" target="_blank" rel="noopener">Открыть Google таблицу</a>
+  </section>
+
+<script src="plan.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
+let S, selected;
+
+function kyiv() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone:'Europe/Kyiv', weekday:'short', hour:'numeric', minute:'numeric', hourCycle:'h23' })
+    .formatToParts(new Date()).map(x => [x.type, x.value]));
+  return { wd: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(p.weekday), min: (+p.hour) * 60 + (+p.minute) };
+}
+
+function render() {
+  const now = kyiv();
+  const isToday = selected === now.wd;
+  const d = Plan.dayPlan(S, selected);
+  $('subtitle').textContent = `${S.group} · ${isToday ? 'сегодня ' : ''}${Plan.DAY_NAMES[selected]}${d ? ' · ' + d.mode : ''}`;
+  [...$('tabs').children].forEach(b => { b.classList.toggle('on', +b.dataset.wd === selected); b.classList.toggle('today', +b.dataset.wd === now.wd); });
+
+  const list = $('list'); list.innerHTML = '';
+  if (!d) { $('hero').hidden = true; list.innerHTML = '<div class="empty">Пар нет — выходной 🎉</div>'; return; }
+
+  // Главная карточка
+  let k = '', v = '';
+  if (isToday) {
+    const cur = d.items.find(i => now.min >= i.start && now.min < i.end);
+    const next = d.needed.find(i => i.start > now.min);
+    if (cur) { k = 'Сейчас'; v = `${cur.subject}${cur.room ? ' · ' + cur.room : ''} до ${Plan.fmt(cur.end)}`; }
+    else if (next) { const m = next.start - now.min; k = 'Следующая нужная'; v = `${next.subject} в ${Plan.fmt(next.start)} · через ${m >= 60 ? Math.floor(m/60) + ' ч ' : ''}${m % 60} мин`; }
+    else { k = 'На сегодня'; v = 'Всё, свободен 🎉'; }
+  } else if (d.first) {
+    k = 'Первая нужная пара'; v = `${Plan.fmt(d.first.start)} · ${d.first.subject}`;
+    if (d.sleepThrough.length) v += ' 😴';
+  } else { k = 'Этот день'; v = 'Всё можно пропустить 😴'; }
+  $('heroK').textContent = k; $('heroV').textContent = v; $('hero').hidden = false;
+
+  d.items.forEach((it, idx) => {
+    if (idx > 0) {
+      const w = d.windows.find(w => w.to === it.start);
+      if (w) list.insertAdjacentHTML('beforeend', `<div class="gap">☕ Окно ${Plan.fmt(w.from)}–${Plan.fmt(w.to)} — можно отдохнуть</div>`);
+    }
+    const state = !isToday ? '' : now.min >= it.end ? 'past' : now.min >= it.start ? 'now' : '';
+    const el = document.createElement('div');
+    el.className = `item ${state} ${it.skippable ? 'skip' : ''}`;
+    el.innerHTML = `<div class="t"><b>${Plan.fmt(it.start)}</b><span>${Plan.fmt(it.end)}</span></div>
+      <div><div class="s"></div><div class="r">${Plan.lessons(it.n)}${it.room ? ' · ауд. ' + it.room : ''}</div>
+      ${state === 'now' ? '<span class="tag now">идёт сейчас</span>' : ''}
+      ${it.skippable ? '<span class="tag sleep">😴 можно проспать</span>' : ''}</div>`;
+    el.querySelector('.s').textContent = it.subject;
+    list.appendChild(el);
+  });
+  if (d.last) list.insertAdjacentHTML('beforeend', `<div class="gap">🏁 Свободен с ${Plan.fmt(d.last.end)}</div>`);
+  Plan.extrasOf(S, selected).forEach(e => {
+    const el = document.createElement('div'); el.className = 'item' + (isToday && now.min > e.at + 60 ? ' past' : '');
+    el.innerHTML = `<div class="t"><b>${e.time}</b></div><div><div class="s"></div><div class="r">📚 после учёбы</div></div>`;
+    el.querySelector('.s').textContent = e.title; list.appendChild(el);
+  });
+}
+
+// ---------- Уведомления ----------
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const fromB64u = (s) => Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
+function showConfig(cfg) {
+  $('notifBody').innerHTML = `
+    <p>Готово ✅ Остался один шаг — передать этот ключ GitHub:</p>
+    <textarea id="cfg" readonly></textarea>
+    <button class="btn" id="copy">Скопировать</button>
+    <ol>
+      <li>Открой свой репозиторий на GitHub → <b>Settings</b> → <b>Secrets and variables</b> → <b>Actions</b></li>
+      <li><b>New repository secret</b>, имя: <b>PUSH_CONFIG</b>, значение — вставь скопированное</li>
+      <li><b>Actions</b> → «Уведомления» → <b>Run workflow</b> → test — должен прийти пуш</li>
+    </ol>
+    <p>Ключ секретный — никому не отправляй и не вставляй в файлы репозитория.</p>
+    <button class="btn ghost" id="redo">Создать ключ заново</button>`;
+  $('cfg').value = JSON.stringify(cfg);
+  $('copy').onclick = async () => { try { await navigator.clipboard.writeText($('cfg').value); $('copy').textContent = 'Скопировано ✓'; } catch { $('cfg').select(); } };
+  $('redo').onclick = () => enablePush(true);
+}
+
+async function enablePush(force) {
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { alertBox('Уведомления запрещены. Включи их: Настройки → Уведомления → Расписание.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const old = await reg.pushManager.getSubscription();
+    if (old) await old.unsubscribe();
+    const kp = await crypto.subtle.generateKey({ name:'ECDSA', namedCurve:'P-256' }, true, ['sign', 'verify']);
+    const publicKey = b64u(await crypto.subtle.exportKey('raw', kp.publicKey));
+    const privateKey = (await crypto.subtle.exportKey('jwk', kp.privateKey)).d;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: fromB64u(publicKey) });
+    const cfg = { subscription: sub.toJSON(), publicKey, privateKey };
+    store.set('pushcfg', JSON.stringify(cfg));
+    showConfig(cfg);
+  } catch (e) { alertBox('Не получилось: ' + e.message); }
+}
+
+function alertBox(text) { $('notifBody').insertAdjacentHTML('afterbegin', `<p style="color:#ff8a8a">${text}</p>`); }
+
+function setupNotif() {
+  const nb = $('notifBody');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !standalone()) {
+    nb.innerHTML = `<p>Чтобы приходили пуши, установи сайт как приложение:</p>
+      <ol><li>Открой эту страницу в <b>Safari</b></li><li>Нажми <b>Поделиться</b> (квадрат со стрелкой)</li>
+      <li><b>На экран «Домой»</b> → Добавить</li><li>Открой «Расписание» с экрана «Домой» и вернись сюда</li></ol>`;
+    return;
+  }
+  const saved = store.get('pushcfg');
+  if (saved && Notification.permission === 'granted') { showConfig(JSON.parse(saved)); return; }
+  nb.innerHTML = `<p>Утром — сводка на день (что можно проспать, где окна, репетитор), вечером — во сколько ставить будильник.</p>
+    <button class="btn" id="enable">Включить уведомления</button>`;
+  $('enable').onclick = () => enablePush(false);
+}
+
+// ---------- Старт ----------
+(async () => {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  S = await (await fetch('schedule.json', { cache:'no-store' })).json();
+  $('sheet').href = S.sheetUrl;
+  const wd = kyiv().wd;
+  selected = (wd >= 1 && wd <= 5) ? wd : 1;
+  ['Пн','Вт','Ср','Чт','Пт'].forEach((n, i) => {
+    const b = document.createElement('button'); b.textContent = n; b.dataset.wd = i + 1;
+    b.onclick = () => { selected = i + 1; render(); }; $('tabs').appendChild(b);
+  });
+  render(); setupNotif();
+  setInterval(render, 60000);
+})();
+</script>
+</body>
+</html>
