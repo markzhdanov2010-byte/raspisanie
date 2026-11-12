@@ -48,6 +48,7 @@
 <body>
   <h1 id="title">Расписание</h1>
   <p class="sub" id="subtitle"></p>
+  <div class="tabs" id="weeks"></div>
   <div class="tabs" id="tabs"></div>
   <div class="hero" id="hero" hidden><div class="k" id="heroK"></div><div class="v" id="heroV"></div></div>
   <div class="list" id="list"></div>
@@ -67,20 +68,17 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const store = { get(k){ try { return localStorage.getItem(k); } catch { return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch {} } };
-let S, selected;
+let S, selected, selWeek;
 
-function kyiv() {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone:'Europe/Kyiv', weekday:'short', hour:'numeric', minute:'numeric', hourCycle:'h23' })
-    .formatToParts(new Date()).map(x => [x.type, x.value]));
-  return { wd: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(p.weekday), min: (+p.hour) * 60 + (+p.minute) };
-}
+function kyiv() { const k = Plan.kyivDate(0); return { wd: k.weekday, min: k.hour * 60 + k.min, week: Plan.weekOf(S, k.y, k.m, k.d) }; }
 
 function render() {
   const now = kyiv();
-  const isToday = selected === now.wd;
-  const d = Plan.dayPlan(S, selected);
+  const isToday = selected === now.wd && selWeek === now.week;
+  const d = Plan.dayPlan(S, selected, selWeek);
   $('subtitle').textContent = `${S.group} · ${isToday ? 'сегодня ' : ''}${Plan.DAY_NAMES[selected]}${d ? ' · ' + d.mode : ''}`;
-  [...$('tabs').children].forEach(b => { b.classList.toggle('on', +b.dataset.wd === selected); b.classList.toggle('today', +b.dataset.wd === now.wd); });
+  [...$('weeks').children].forEach(b => { b.classList.toggle('on', +b.dataset.w === selWeek); b.classList.toggle('today', +b.dataset.w === now.week); });
+  [...$('tabs').children].forEach(b => { b.classList.toggle('on', +b.dataset.wd === selected); b.classList.toggle('today', +b.dataset.wd === now.wd && selWeek === now.week); });
 
   const list = $('list'); list.innerHTML = '';
   if (!d) { $('hero').hidden = true; list.innerHTML = '<div class="empty">Пар нет — выходной 🎉</div>'; return; }
@@ -183,8 +181,15 @@ function setupNotif() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
   S = await (await fetch('schedule.json', { cache:'no-store' })).json();
   $('sheet').href = S.sheetUrl;
-  const wd = kyiv().wd;
-  selected = (wd >= 1 && wd <= 5) ? wd : 1;
+  const k = Plan.kyivDate(0);
+  let start = k;
+  if (k.weekday === 0 || k.weekday === 6) start = Plan.kyivDate(k.weekday === 6 ? 2 : 1); // в выходные показываем понедельник
+  selected = start.weekday;
+  selWeek = Plan.weekOf(S, start.y, start.m, start.d);
+  [1, 2, 3, 4].forEach(w => {
+    const b = document.createElement('button'); b.textContent = w + ' тиж.'; b.dataset.w = w;
+    b.onclick = () => { selWeek = w; render(); }; $('weeks').appendChild(b);
+  });
   ['Пн','Вт','Ср','Чт','Пт'].forEach((n, i) => {
     const b = document.createElement('button'); b.textContent = n; b.dataset.wd = i + 1;
     b.onclick = () => { selected = i + 1; render(); }; $('tabs').appendChild(b);
